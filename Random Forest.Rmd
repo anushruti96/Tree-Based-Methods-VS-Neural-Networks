@@ -1,0 +1,84 @@
+---
+title: "Random Forest"
+output: html_document
+date: "2023-05-11"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+
+suppressMessages(library(caret))
+suppressMessages(library(tidyverse))
+suppressMessages(library(randomForest))
+suppressMessages(library(MLmetrics))
+
+#Loading DataSet
+data <- read.csv("API.csv")
+data <- data %>% select(-date_time,-is_holiday)
+
+#Encoding categotical to numerical
+dummy_data <- dummyVars(" ~.", data=data)
+data <- data.frame(predict(dummy_data, newdata=data))
+
+#data Normalizing
+preprocess_data <- preProcess(data, method=c("range"))
+data_n <- predict(preprocess_data, data)
+
+#test-train Splitting
+set.seed(333)
+sample <- sample(c(TRUE, FALSE), nrow(data_n), replace=TRUE, prob=c(0.7,0.3))
+table(sample)
+data_train  <- data_n[sample,]
+data_test   <- data_n[!sample,]
+
+data_test_X <- data_test %>% select(-air_pollution_index)
+data_test_Y <- data_test %>% select(air_pollution_index)
+
+
+#random forest model-default
+fit_default <- randomForest(air_pollution_index ~ ., data = data_train)
+View(data_test_X)
+pred_default <- predict(fit_default, newdata = data_test_X)
+
+MSE_default <- mean((data_test_Y$air_pollution_index - pred_default)^2)
+rmse_default <- sqrt(MSE_default)
+logloss_default <- LogLoss(pred_default, data_test_Y$air_pollution_index)
+rmse_default
+
+#Best params by using randomForest$mse and cross validation
+ntree <- 200
+mtry <- seq(2, ncol(data_train)-1, by = 1)
+
+res <- data.frame()
+for (m in mtry) {
+  mse <- data.frame()
+  for (i in 1:5) {
+    ind = sample(nrow(data_train), replace = TRUE)
+    model <- randomForest(air_pollution_index ~ ., data = data_train[ind,], mtry = m, ntree = ntree)
+    mse <- rbind(mse, data.frame(run = i, mtry = m, ntree = 1:ntree, MSE = model$mse))
+  }
+  res <- rbind(res, mse %>% group_by(mtry, ntree)  %>% summarize(MSE_mean = mean(MSE), .groups = 'drop'))
+}
+
+#best tuning parameter
+res %>% filter(MSE_mean == min(MSE_mean))
+
+ggplot(data = res, aes(x = ntree, y = MSE_mean, color = factor(mtry)))+ 
+  geom_line() +
+  geom_point(data = res %>% filter(MSE_mean == min(MSE_mean)), lwd=2, color="red")+
+  geom_text(data = res %>% filter(MSE_mean == min(MSE_mean)), label = "Min MSE", color = "black", nudge_y = -0.75, size=3)
+
+#random forest model-Best Param 
+fit_best <- randomForest(air_pollution_index ~ ., data = data_train, mtry = 18, ntree = 200)
+pred_best <- predict(fit_best, newdata = data_test_X)
+
+MSE_best <- mean((data_test_Y$air_pollution_index - pred_best)^2)
+rmse_best <- sqrt(MSE_best)
+logloss_best <- LogLoss(pred_best, data_test_Y$air_pollution_index)
+rmse_best
+logloss_best
+
+```
